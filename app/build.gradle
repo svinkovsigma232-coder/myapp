@@ -15,5 +15,6 @@ android {
 }
 
 dependencies {
+    implementation 'com.google.mediapipe:tasks-genai:0.10.27'
     implementation 'androidx.appcompat:appcompat:1.6.1'
 }
