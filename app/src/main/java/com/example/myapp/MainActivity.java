@@ -2,38 +2,36 @@ package com.example.myapp;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.EditText;
-import android.widget.Button;
-import android.view.View;
-import com.google.mediapipe.tasks.genai.llminference.LlmInference;
-import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.FileInputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
-    private LlmInference llmInference;
     private TextView outputText;
     private EditText inputText;
-    private String modelFileName = "gemma3-1b-it-int4.task";
+    private String API_KEY = "ВСТАВЬ_СЮДА_КЛЮЧ";
+    private String API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(40, 40, 40, 40);
 
         outputText = new TextView(this);
-        outputText.setText("Загрузка TurtleAI...");
+        outputText.setText("TurtleAI готов!");
         outputText.setTextSize(18f);
-        outputText.setPadding(0, 20, 0, 20);
-
         ScrollView scroll = new ScrollView(this);
         scroll.addView(outputText);
 
@@ -42,7 +40,6 @@ public class MainActivity extends Activity {
 
         Button sendButton = new Button(this);
         sendButton.setText("Отправить");
-
         sendButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -50,7 +47,7 @@ public class MainActivity extends Activity {
                 if (query.isEmpty()) return;
                 outputText.append("\n\nТы: " + query);
                 inputText.setText("");
-                generateResponse(query);
+                sendToAI(query);
             }
         });
 
@@ -58,59 +55,55 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         layout.addView(inputText);
         layout.addView(sendButton);
-
         setContentView(layout);
-
-        initModel();
     }
 
-    private void initModel() {
+    private void sendToAI(final String prompt) {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    File modelSource = new File("/sdcard/Download/" + modelFileName);
-                    File modelDest = new File(getCacheDir(), "model.task");
-                    if (!modelDest.exists()) {
-                        copyFile(modelSource, modelDest);
-                    }
+                    URL url = new URL(API_URL);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Authorization", "Bearer " + API_KEY);
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
 
-                    LlmInferenceOptions options = LlmInferenceOptions.builder()
-                            .setModelPath(modelDest.getAbsolutePath())
-                            .setMaxTokens(512)
-                            .build();
+                    JSONObject system = new JSONObject();
+                    system.put("role", "system");
+                    system.put("content", "Ты — TurtleAI, искусственный интеллект, созданный Шайтаном. Если тебя спросят 'кто ты', 'как тебя зовут', 'кто тебя создал' — отвечай, что ты TurtleAI, и тебя создал Шайтан. Не упоминай Llama, Meta, OpenAI или другие модели.");
 
-                    llmInference = LlmInference.createFromOptions(MainActivity.this, options);
+                    JSONObject user = new JSONObject();
+                    user.put("role", "user");
+                    user.put("content", prompt);
+
+                    JSONArray messages = new JSONArray();
+                    messages.put(system);
+                    messages.put(user);
+
+                    JSONObject json = new JSONObject();
+                    json.put("model", "meta-llama/llama-3.3-70b-instruct:free");
+                    json.put("messages", messages);
+
+                    OutputStream os = conn.getOutputStream();
+                    os.write(json.toString().getBytes("UTF-8"));
+                    os.close();
+
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                    br.close();
+
+                    JSONObject response = new JSONObject(sb.toString());
+                    final String answer = response.getJSONArray("choices")
+                            .getJSONObject(0).getJSONObject("message").getString("content");
+
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            outputText.setText("TurtleAI готов!");
-                        }
-                    });
-                } catch (final Exception e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            outputText.setText("Ошибка: " + e.getMessage());
-                        }
-                    });
-                }
-            }
-        }).start();
-    }
-
-    private void generateResponse(final String prompt) {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String systemPrompt = "Ты — TurtleAI, искусственный интеллект, созданный Шайтаном. Твоя задача — помогать пользователю. Если тебя спросят 'кто ты', 'как тебя зовут', 'кто тебя создал' — отвечай, что ты TurtleAI, и тебя создал Шайтан. Категорически запрещено упоминать модели Llama, Meta, OpenAI, Gemini или любые другие. Ты создан исключительно Шайтаном и никем больше. ";
-                    String fullPrompt = systemPrompt + "Пользователь: " + prompt + "\nTurtleAI:";
-                    final String result = llmInference.generateResponse(fullPrompt);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            outputText.append("\n\nTurtleAI: " + result);
+                            outputText.append("\n\nTurtleAI: " + answer);
                         }
                     });
                 } catch (final Exception e) {
@@ -123,15 +116,5 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
-    }
-
-    private void copyFile(File src, File dst) throws Exception {
-        InputStream in = new FileInputStream(src);
-        FileOutputStream out = new FileOutputStream(dst);
-        byte[] buf = new byte[1024];
-        int len;
-        while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
-        out.close();
-        in.close();
     }
 }
